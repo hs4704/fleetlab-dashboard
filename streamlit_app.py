@@ -8,10 +8,6 @@ st.set_page_config(page_title="FleetLab Safety Dashboard", layout="wide")
 df_stops = pd.read_csv("sample_stops.csv")
 df_transport = pd.read_csv("transportation_mode_risk.csv")
 
-# Risk calc
-df_transport["Base_Risk"] = df_transport["Risk_per_Million"] * df_transport["Base_%"]
-df_transport["Switch_Risk"] = df_transport["Risk_per_Million"] * df_transport["Switch_%"]
-
 st.title("🚐 FleetLab Safety Estimation Dashboard")
 
 st.sidebar.header("Community Risk Inputs")
@@ -19,6 +15,21 @@ teen_rate = st.sidebar.slider("Teen Drivers (%)", 0.0, 1.0, 0.4, 0.05)
 van_adoption = st.sidebar.slider("FleetLab Van Adoption (%)", 0.0, 1.0, 0.2, 0.05)
 avg_ses = st.sidebar.slider("Avg Stop SES Score", 0.0, 1.0, 0.7, 0.05)
 students = st.sidebar.slider("Total Students in District", 100, 10000, 2000, 100)
+
+# Dynamically update Switch_% based on van_adoption slider
+df_transport["Switch_%"] = df_transport["Base_%"]  # start from base
+df_transport.loc[df_transport["Mode"] == "FleetLab Van", "Switch_%"] = van_adoption
+
+# Recalculate other mode %s proportionally to keep total = 100%
+other_modes = df_transport[df_transport["Mode"] != "FleetLab Van"].copy()
+rescale = 1 - van_adoption
+other_modes["Switch_%"] = (other_modes["Base_%"] / other_modes["Base_%"].sum()) * rescale
+
+df_transport.update(other_modes)
+
+# Calculate Risks
+df_transport["Base_Risk"] = df_transport["Risk_per_Million"] * df_transport["Base_%"]
+df_transport["Switch_Risk"] = df_transport["Risk_per_Million"] * df_transport["Switch_%"]
 
 st.subheader("📊 Transportation Mode Risk")
 st.dataframe(df_transport[["Mode", "Base_Risk", "Switch_Risk"]])
