@@ -1,0 +1,6 @@
+Mode,Risk_per_Million,Base_%,Base_Risk,Switch_%,Switch_Risk
+School Bus,1.0,0.1,0.1,0.1,0.1
+Parent Drive,6.0,0.4,2.4000000000000004,0.25,1.5
+Teen Drive,30.0,0.35,10.5,0.25,7.5
+Walk/Bike,3.0,0.05,0.15000000000000002,0.05,0.15000000000000002
+FleetLab Van,2.5,0.1,0.25,0.3,0.75
