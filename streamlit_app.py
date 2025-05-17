@@ -26,6 +26,17 @@ fig, ax = plt.subplots(figsize=(8, 5))
 df_transport.plot(x="Mode", y=["Base_Risk", "Switch_Risk"], kind="bar",
                   ax=ax, color=["#FFA07A", "#90EE90"])
 plt.title("Expected Injuries per 1M Students")
+
+# --- Risk Summary Text Block ---
+base = df_transport["Base_Risk"].sum()
+switch = df_transport["Switch_Risk"].sum()
+drop = base - switch
+percent = (drop / base) * 100
+
+st.markdown("## 📉 System Risk Insight")
+st.success(f"Under the current transportation mix, the expected risk is **{base:.2f} injuries per 1M students**.")
+st.success(f"After adopting FleetLab vans, risk drops to **{switch:.2f}**, a reduction of **{drop:.2f}**, or **{percent:.1f}%**.")
+
 plt.ylabel("Risk Contribution")
 plt.xticks(rotation=45)
 st.pyplot(fig)
