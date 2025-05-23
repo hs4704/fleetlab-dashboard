@@ -3,4 +3,4 @@ pandas
 matplotlib
 folium
 googlemaps
-Streamlit-folium 
+streamlit-folium 
