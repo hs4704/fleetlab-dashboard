@@ -20,46 +20,37 @@ if uploaded_file:
 else:
     df_stops = pd.read_csv("sample_stops.csv")
     st.sidebar.warning("📄 Using default sample_stops.csv")
-
-df_transport = pd.read_csv("transportation_mode_risk.csv")
-
 import googlemaps
 import time
 
 gmaps= googlemaps.Client(key=st.secrets["google"]["maps_api_key"])
 
-@st.cache_data(show_spinner=False)
-def geocode_address(address):
-    try:
-        geocode = gmaps.geocode(address)
-        if geocode:
-            return geocode[0]["geometry"]["location"]
-    except:
-        return None
+df_transport = pd.read_csv("transportation_mode_risk.csv")
+
+@st.cache_data(show_spinner="Geocoding addresses...")
+def geocode_addresses(addresses):
+    latitudes, longitudes = [],[]
+    for address in addresses:
+        try:
+            geocode = gmaps.geocode(address)
+            if geocode:
+                location= geocode[0]['geometry']['location']
+                latitudes.append(location["lat"])
+                longitudes.append(location["lng"])
+            else:
+                latitudes.append(None)
+                longitudes.append(None)
+        except:
+            latitudes.append(None)
+            longitudes.append(None)
+        time.sleep(0.2)
+    return latitudes, longitudes
 # Geocode address to lat/lon
 if "lat" not in df_stops.columns or "lon" not in df_stops.columns:
     if "Address" in df_stops.columns:
-        latitudes = []
-        longitudes = []
-
-        for address in df_stops["Address"]:
-            location = geocode_address(address)
-            try:
-                geocode = gmaps.geocode(address)
-                if location:
-                    latitudes.append(location["lat"])
-                    longitudes.append(location["lng"])
-                else:
-                    latitudes.append(None)
-                    longitudes.append(None)
-            except Exception as e:
-                latitudes.append(None)
-                longitudes.append(None)
-                print(f"Error geocoding {address}: {e}")
-            time.sleep(0.2)  # prevent hitting rate limit
-
-        df_stops["lat"] = latitudes
-        df_stops["lon"] = longitudes
+        lats, lons = geocode_addresses(df_stops["Address"])
+        df_stops["lat"] = lats
+        df_stops["lon"] = lons
     else:
         st.warning("⚠️ No Address column found, and no lat/lon available.")
 
@@ -94,15 +85,15 @@ df_transport["Base_Risk"] = df_transport["Risk_per_Million"] * df_transport["Bas
 df_transport["Switch_Risk"] = df_transport["Risk_per_Million"] * df_transport["Switch_%"]
 
 # === TRANSPORTATION RISK CHART ===
-st.subheader("📊 Transportation Mode Risk")
-st.dataframe(df_transport[["Mode", "Base_Risk", "Switch_Risk"]])
-fig, ax = plt.subplots(figsize=(8, 5))
-df_transport.plot(x="Mode", y=["Base_Risk", "Switch_Risk"], kind="bar", ax=ax,
+with st.expander("📊 Transportation Mode Risk", expanded= True):
+    st.dataframe(df_transport[["Mode", "Base_Risk", "Switch_Risk"]])
+    fig, ax = plt.subplots(figsize=(8, 5))
+    df_transport.plot(x="Mode", y=["Base_Risk", "Switch_Risk"], kind="bar", ax=ax,
                   color=["#FFA07A", "#90EE90"])
-plt.title("Expected Injuries per 1M Students")
-plt.ylabel("Risk Contribution")
-plt.xticks(rotation=45)
-st.pyplot(fig)
+    plt.title("Expected Injuries per 1M Students")
+    plt.ylabel("Risk Contribution")
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
 
 # === INSIGHT SUMMARY ===
 base = df_transport["Base_Risk"].sum()
@@ -122,10 +113,10 @@ score = calc_community_risk(teen_rate, van_adoption, avg_ses)
 category = "✅ Low Risk" if score <= -0.5 else "🟡 Medium Risk" if score <= 1 else "❌ High Risk"
 expected = max(score, 0) * students / 1000
 
-st.subheader("🏫 Community Risk Estimation")
-st.write(f"📊 **Score:** {score:.2f}")
-st.write(f"🧭 **Risk Category:** {category}")
-st.write(f"📈 **Estimated Injuries/Deaths:** {expected:.1f} per {students:,} students")
+with st.expander("🏫 Community Risk Estimation", expanded=False):
+    st.write(f"📊 **Score:** {score:.2f}")
+    st.write(f"🧭 **Risk Category:** {category}")
+    st.write(f"📈 **Estimated Injuries/Deaths:** {expected:.1f} per {students:,} students")
 
 # === SES SCORE CALCULATION ===
 def compute_ses(row):
@@ -152,41 +143,41 @@ def classify_ses(score):
 df_stops["Safety Rating"] = df_stops["SES Score"].apply(classify_ses)
 
 # === MAP VIEW ===
-st.subheader("🌍 Stop Safety Map")
+with st.expander("🌍 Stop Safety Map", expanded=False):
 
-if "lat" in df_stops.columns and "lon" in df_stops.columns:
-    m = folium.Map(location=[df_stops["lat"].mean(), df_stops["lon"].mean()], zoom_start=13)
-    marker_cluster = MarkerCluster().add_to(m)
+    if "lat" in df_stops.columns and "lon" in df_stops.columns:
+        m = folium.Map(location=[df_stops["lat"].mean(), df_stops["lon"].mean()], zoom_start=13)
+        marker_cluster = MarkerCluster().add_to(m)
 
-    for _, row in df_stops.iterrows():
-        if pd.notna(row["lat"]) and pd.notna(row["lon"]):
-            color = "green" if row["Safety Rating"] == "Safe" else "orange" if row["Safety Rating"] == "Acceptable" else "red"
-            folium.CircleMarker(
-                location=[row["lat"], row["lon"]],
-                radius=6,
-                color=color,
-                fill=True,
-                fill_opacity=0.7,
-                popup=(f"<b>{row['Stop Name']}</b><br>SES: {row['SES Score']:.2f}<br>Rating: {row['Safety Rating']}")
-            ).add_to(marker_cluster)
-    st_folium(m, width=800)
-else:
-    st.warning("📍 Map data not available (lat/lon columns missing).")
+        for _, row in df_stops.iterrows():
+            if pd.notna(row["lat"]) and pd.notna(row["lon"]):
+                color = "green" if row["Safety Rating"] == "Safe" else "orange" if row["Safety Rating"] == "Acceptable" else "red"
+                folium.CircleMarker(
+                    location=[row["lat"], row["lon"]],
+                    radius=6,
+                    color=color,
+                    fill=True,
+                    fill_opacity=0.7,
+                    popup=(f"<b>{row['Stop Name']}</b><br>SES: {row['SES Score']:.2f}<br>Rating: {row['Safety Rating']}")
+                ).add_to(marker_cluster)
+        st_folium(m, width=800)
+    else:
+        st.warning("📍 Map data not available (lat/lon columns missing).")
 
 # === SES TABLE + BAR CHART ===
-st.subheader("🚏 Stop Safety Table")
-st.dataframe(df_stops[["Stop Name", "SES Score", "Safety Rating"]])
+with st.expander("🚏 Stop Safety Table + Chart", expanded= False):
+    st.dataframe(df_stops[["Stop Name", "SES Score", "Safety Rating"]])
 
-fig2, ax2 = plt.subplots(figsize=(10, 6))
-df_sorted = df_stops.sort_values("SES Score")
-colors = df_sorted["Safety Rating"].map({
-    "Safe": "green", "Acceptable": "orange", "Unsafe": "red"
-})
-ax2.barh(df_sorted["Stop Name"], df_sorted["SES Score"], color=colors)
-ax2.axvline(0.7, linestyle="--", color="green", label="Safe Threshold (0.7)")
-ax2.axvline(0.5, linestyle="--", color="orange", label="Acceptable Threshold (0.5)")
-plt.title("Stop Safety Scores (SES)")
-plt.xlabel("SES Score")
-plt.legend(loc="lower right")
-plt.tight_layout()
-st.pyplot(fig2)
+    fig2, ax2 = plt.subplots(figsize=(10, 6))
+    df_sorted = df_stops.sort_values("SES Score")
+    colors = df_sorted["Safety Rating"].map({
+        "Safe": "green", "Acceptable": "orange", "Unsafe": "red"
+    })
+    ax2.barh(df_sorted["Stop Name"], df_sorted["SES Score"], color=colors)
+    ax2.axvline(0.7, linestyle="--", color="green", label="Safe Threshold (0.7)")
+    ax2.axvline(0.5, linestyle="--", color="orange", label="Acceptable Threshold (0.5)")
+    plt.title("Stop Safety Scores (SES)")
+    plt.xlabel("SES Score")
+    plt.legend(loc="lower right")
+    plt.tight_layout()
+    st.pyplot(fig2)
