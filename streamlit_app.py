@@ -15,12 +15,53 @@ st.sidebar.header("Upload Your Stop File")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with Stop Data", type="csv")
 if uploaded_file:
     df_stops = pd.read_csv(uploaded_file)
+    
     st.sidebar.success("✅ File uploaded successfully!")
 else:
     df_stops = pd.read_csv("sample_stops.csv")
     st.sidebar.warning("📄 Using default sample_stops.csv")
 
 df_transport = pd.read_csv("transportation_mode_risk.csv")
+
+import googlemaps
+import time
+
+gmaps= googlemaps.Client(key=st.secrets["google"]["maps_api_key"])
+
+@st.cache_data(show_spinner=False)
+def geocode_address(address):
+    try:
+        geocode = gmaps.geocode(address)
+        if geocode:
+            return geocode[0]["geometry"]["location"]
+    except:
+        return None
+# Geocode address to lat/lon
+if "lat" not in df_stops.columns or "lon" not in df_stops.columns:
+    if "Address" in df_stops.columns:
+        latitudes = []
+        longitudes = []
+
+        for address in df_stops["Address"]:
+            location = geocode_address(address)
+            try:
+                geocode = gmaps.geocode(address)
+                if location:
+                    latitudes.append(location["lat"])
+                    longitudes.append(location["lng"])
+                else:
+                    latitudes.append(None)
+                    longitudes.append(None)
+            except Exception as e:
+                latitudes.append(None)
+                longitudes.append(None)
+                print(f"Error geocoding {address}: {e}")
+            time.sleep(0.2)  # prevent hitting rate limit
+
+        df_stops["lat"] = latitudes
+        df_stops["lon"] = longitudes
+    else:
+        st.warning("⚠️ No Address column found, and no lat/lon available.")
 
 # === COMMUNITY RISK SLIDERS ===
 st.sidebar.header("Community Risk Inputs")
