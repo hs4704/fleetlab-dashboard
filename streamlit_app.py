@@ -4,180 +4,167 @@ import matplotlib.pyplot as plt
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import MarkerCluster
+import googlemaps
+import time
+import os
 
 # === PAGE CONFIG ===
 st.set_page_config(page_title="FleetLab Safety Dashboard", layout="wide")
 
 st.title("🚐 FleetLab Safety Estimation Dashboard")
 
-# === FILE UPLOAD ===
-st.sidebar.header("Upload Your Stop File")
-uploaded_file = st.sidebar.file_uploader("Upload CSV with Stop Data", type="csv")
-if uploaded_file:
-    df_stops = pd.read_csv(uploaded_file)
-    
-    st.sidebar.success("✅ File uploaded successfully!")
-else:
-    df_stops = pd.read_csv("sample_stops.csv")
-    st.sidebar.warning("📄 Using default sample_stops.csv")
-import googlemaps
-import time
-
-gmaps= googlemaps.Client(key=st.secrets["google"]["maps_api_key"])
-
+# === LOAD TRANSPORTATION MODE RISK DATA ===
 df_transport = pd.read_csv("transportation_mode_risk.csv")
+
+# === CONSTANTS ===
+SES_WEIGHTS = {
+    'lighting': 0.15,
+    'traffic': 0.20,
+    'speed': 0.15,
+    'sidewalk': 0.15,
+    'visibility': 0.15,
+    'shoulder': 0.10,
+    'crime': 0.10
+} #These weights are from fleetlab excel sheet
+
+MODE_MODIFIERS = {
+    'Car': 1.0,
+    'School Bus': 0.8,
+    'FleetLab Van': 0.5
+}
+
+SES_THRESHOLDS = {
+    'Safe': 85,
+    'Acceptable': 70
+}
+# === HELPERS ===
+def validate_uploaded_file(df):
+    required_columns = list(SES_WEIGHTS.keys()) + ['Address']
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        st.error(f"Uploaded file is missing columns: {', '.join(missing_cols)}")
+        return False
+    return True
 
 @st.cache_data(show_spinner="Geocoding addresses...")
 def geocode_addresses(addresses):
-    latitudes, longitudes = [],[]
+    gmaps = googlemaps.Client(key=st.secrets["google"]["maps_api_key"])
+    latitudes, longitudes = [], []
     for address in addresses:
         try:
-            geocode = gmaps.geocode(address)
-            if geocode:
-                location= geocode[0]['geometry']['location']
-                latitudes.append(location["lat"])
-                longitudes.append(location["lng"])
+            geocode_result = gmaps.geocode(address)
+            if geocode_result:
+                loc = geocode_result[0]['geometry']['location']
+                latitudes.append(loc['lat'])
+                longitudes.append(loc['lng'])
             else:
                 latitudes.append(None)
                 longitudes.append(None)
-        except:
+        except Exception as e:
             latitudes.append(None)
             longitudes.append(None)
         time.sleep(0.2)
     return latitudes, longitudes
-# Geocode address to lat/lon
-if "lat" not in df_stops.columns or "lon" not in df_stops.columns:
-    if "Address" in df_stops.columns:
-        lats, lons = geocode_addresses(df_stops["Address"])
-        df_stops["lat"] = lats
-        df_stops["lon"] = lons
-    else:
-        st.warning("⚠️ No Address column found, and no lat/lon available.")
 
-# === COMMUNITY RISK SLIDERS ===
-st.sidebar.header("Community Risk Inputs")
-teen_rate = st.sidebar.slider("Teen Drivers (%)", 0.0, 1.0, 0.4, 0.05)
-van_adoption = st.sidebar.slider("FleetLab Van Adoption (%)", 0.0, 1.0, 0.2, 0.05)
-avg_ses = st.sidebar.slider("Avg Stop SES Score", 0.0, 1.0, 0.7, 0.05)
-students = st.sidebar.slider("Total Students in District", 100, 10000, 2000, 100)
+def calculate_ses(row, modifier=1.0):
+    raw_score = sum(row[factor] * weight for factor, weight in SES_WEIGHTS.items())
+    ses_score = min(raw_score * modifier, 100)
+    return ses_score
 
-# === SES WEIGHT SLIDERS ===
-st.sidebar.header("Customize SES Weights")
-weights = {
-    "V": st.sidebar.slider("Weight: Visibility", 0.0, 1.0, 0.25, 0.05),
-    "L": st.sidebar.slider("Weight: Lighting", 0.0, 1.0, 0.15, 0.05),
-    "T": st.sidebar.slider("Weight: Traffic Risk", 0.0, 1.0, 0.25, 0.05),
-    "P": st.sidebar.slider("Weight: Pedestrian Safety", 0.0, 1.0, 0.2, 0.05),
-    "S": st.sidebar.slider("Weight: Sidewalk Quality", 0.0, 1.0, 0.1, 0.05),
-    "C": st.sidebar.slider("Weight: Construction Risk", 0.0, 1.0, 0.05, 0.05),
-    "U": st.sidebar.slider("Weight: U-Turn Required", 0.0, 1.0, 0.05, 0.05)
-}
-
-# === TRANSPORT RISK CALCULATION ===
-df_transport["Switch_%"] = df_transport["Base_%"]
-df_transport.loc[df_transport["Mode"] == "FleetLab Van", "Switch_%"] = van_adoption
-other_modes = df_transport[df_transport["Mode"] != "FleetLab Van"].copy()
-rescale = 1 - van_adoption
-other_modes["Switch_%"] = (other_modes["Base_%"] / other_modes["Base_%"].sum()) * rescale
-df_transport.update(other_modes)
-
-df_transport["Base_Risk"] = df_transport["Risk_per_Million"] * df_transport["Base_%"]
-df_transport["Switch_Risk"] = df_transport["Risk_per_Million"] * df_transport["Switch_%"]
-
-# === TRANSPORTATION RISK CHART ===
-with st.expander("📊 Transportation Mode Risk", expanded= True):
-    st.dataframe(df_transport[["Mode", "Base_Risk", "Switch_Risk"]])
-    fig, ax = plt.subplots(figsize=(8, 5))
-    df_transport.plot(x="Mode", y=["Base_Risk", "Switch_Risk"], kind="bar", ax=ax,
-                  color=["#FFA07A", "#90EE90"])
-    plt.title("Expected Injuries per 1M Students")
-    plt.ylabel("Risk Contribution")
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
-
-# === INSIGHT SUMMARY ===
-base = df_transport["Base_Risk"].sum()
-switch = df_transport["Switch_Risk"].sum()
-drop = base - switch
-percent = (drop / base) * 100
-
-st.markdown("## 📉 System Risk Insight")
-st.success(f"Current expected risk: **{base:.2f} per 1M students**")
-st.success(f"After switching to FleetLab: **{switch:.2f}**, a reduction of **{drop:.2f}** ({percent:.1f}%)")
-
-# === COMMUNITY RISK CALC ===
-def calc_community_risk(teen, van, ses, w1=5, w2=3, w3=2):
-    return (teen * w1) - (van * w2) - (ses * w3)
-
-score = calc_community_risk(teen_rate, van_adoption, avg_ses)
-category = "✅ Low Risk" if score <= -0.5 else "🟡 Medium Risk" if score <= 1 else "❌ High Risk"
-expected = max(score, 0) * students / 1000
-
-with st.expander("🏫 Community Risk Estimation", expanded=False):
-    st.write(f"📊 **Score:** {score:.2f}")
-    st.write(f"🧭 **Risk Category:** {category}")
-    st.write(f"📈 **Estimated Injuries/Deaths:** {expected:.1f} per {students:,} students")
-
-# === SES SCORE CALCULATION ===
-def compute_ses(row):
-    return (
-        weights["V"] * row["Visibility (V)"] +
-        weights["L"] * row["Lighting (L)"] +
-        weights["T"] * (1 - row["Traffic Risk (T)"]) +
-        weights["P"] * row["Pedestrian Safety (P)"] +
-        weights["S"] * (1 - row["Sidewalk Quality (S)"]) +
-        weights["C"] * (1 - row["Construction Risk (C)"]) +
-        weights["U"] * (1 - row["U-Turn Required (U)"])
-    )
-
-df_stops["SES Score"] = df_stops.apply(compute_ses, axis=1)
-
-def classify_ses(score):
-    if score > 0.7:
+def assign_ses_category(score):
+    if score >= SES_THRESHOLDS['Safe']:
         return "Safe"
-    elif score >= 0.5:
+    elif score >= SES_THRESHOLDS['Acceptable']:
         return "Acceptable"
     else:
         return "Unsafe"
 
-df_stops["Safety Rating"] = df_stops["SES Score"].apply(classify_ses)
+# INTERACTIVE MAP
+def render_map(df):
+    m = folium.Map(location=[df['Latitude'].mean(), df['Longitude'].mean()], zoom_start=12)
+    marker_cluster = MarkerCluster().add_to(m)
 
-# === MAP VIEW ===
-with st.expander("🌍 Stop Safety Map", expanded=False):
+    for _, row in df.iterrows():
+        popup = folium.Popup(f"Address: {row['Address']}<br>SES: {row['SES']:.1f}<br>Category: {row['SES_Category']}", max_width=300)
+        color = {"Safe": "green", "Acceptable": "orange", "Unsafe": "red"}[row['SES_Category']]
+        folium.Marker([row['Latitude'], row['Longitude']], popup=popup, icon=folium.Icon(color=color)).add_to(marker_cluster)
+    
+    st_folium(m, width=700, height=500)
+# SAFETY SUMMARY BAR CHART
+def render_safety_summary(df):
+    summary = df['SES_Category'].value_counts().reindex(["Safe", "Acceptable", "Unsafe"], fill_value=0)
+    st.subheader("Safety Summary")
+    st.write(summary)
+    summary.plot(kind="bar", color=["green", "orange", "red"])
+    st.pyplot(plt)
 
-    if "lat" in df_stops.columns and "lon" in df_stops.columns:
-        m = folium.Map(location=[df_stops["lat"].mean(), df_stops["lon"].mean()], zoom_start=13)
-        marker_cluster = MarkerCluster().add_to(m)
+# Calculate SES scores for each mode globally
+def simulate_all_modes(df_original):
+    simulation_results = {}
+    
+    for mode, modifier in MODE_MODIFIERS.items():
+        df = df_original.copy()
+        df['SES'] = df.apply(lambda row: calculate_ses(row, modifier), axis=1)
+        df['SES_Category'] = df['SES'].apply(assign_ses_category)
+        summary = df['SES_Category'].value_counts().reindex(["Safe", "Acceptable", "Unsafe"], fill_value=0)
+        simulation_results[mode] = summary
+    
+    return simulation_results
 
-        for _, row in df_stops.iterrows():
-            if pd.notna(row["lat"]) and pd.notna(row["lon"]):
-                color = "green" if row["Safety Rating"] == "Safe" else "orange" if row["Safety Rating"] == "Acceptable" else "red"
-                folium.CircleMarker(
-                    location=[row["lat"], row["lon"]],
-                    radius=6,
-                    color=color,
-                    fill=True,
-                    fill_opacity=0.7,
-                    popup=(f"<b>{row['Stop Name']}</b><br>SES: {row['SES Score']:.2f}<br>Rating: {row['Safety Rating']}")
-                ).add_to(marker_cluster)
-        st_folium(m, width=800)
-    else:
-        st.warning("📍 Map data not available (lat/lon columns missing).")
+# Comparison bar chart
+def render_simulation_chart(simulation_results):
+    categories = ["Safe", "Acceptable", "Unsafe"]
+    modes = list(MODE_MODIFIERS.keys())
+    data = {cat: [simulation_results[mode][cat] for mode in modes] for cat in categories}
+    df_sim = pd.DataFrame(data, index=modes)
+    
+    df_sim.plot(kind="bar", stacked=False, color=["green", "orange", "red"])
+    plt.title("Safety Simulation: Mode Comparison")
+    plt.ylabel("Number of Stops")
+    plt.xlabel("Transportation Mode")
+    plt.xticks(rotation=0)
+    st.pyplot(plt)
+# === FILE UPLOAD ===
+st.sidebar.header("Upload Your Stop File")
+uploaded_file = st.sidebar.file_uploader("Upload CSV with Stop Data", type="csv")
 
-# === SES TABLE + BAR CHART ===
-with st.expander("🚏 Stop Safety Table + Chart", expanded= False):
-    st.dataframe(df_stops[["Stop Name", "SES Score", "Safety Rating"]])
+if uploaded_file:
+    df_stops = pd.read_csv(uploaded_file)
+    if not validate_uploaded_file(df_stops):
+        st.stop()
+    st.sidebar.success("✅ File uploaded successfully!")
+else:
+    df_stops = pd.read_csv("sample_stops.csv")
+    st.sidebar.warning("📄 Using default sample_stops.csv")
 
-    fig2, ax2 = plt.subplots(figsize=(10, 6))
-    df_sorted = df_stops.sort_values("SES Score")
-    colors = df_sorted["Safety Rating"].map({
-        "Safe": "green", "Acceptable": "orange", "Unsafe": "red"
-    })
-    ax2.barh(df_sorted["Stop Name"], df_sorted["SES Score"], color=colors)
-    ax2.axvline(0.7, linestyle="--", color="green", label="Safe Threshold (0.7)")
-    ax2.axvline(0.5, linestyle="--", color="orange", label="Acceptable Threshold (0.5)")
-    plt.title("Stop Safety Scores (SES)")
-    plt.xlabel("SES Score")
-    plt.legend(loc="lower right")
-    plt.tight_layout()
-    st.pyplot(fig2)
+# === GEOCODING ===
+if 'Latitude' not in df_stops.columns or 'Longitude' not in df_stops.columns:
+    lat, lon = geocode_addresses(df_stops['Address'])
+    df_stops['Latitude'] = lat
+    df_stops['Longitude'] = lon
+
+# === BATCH MODE OVERRIDE ===
+st.sidebar.header("Batch Mode Override")
+if 'batch_mode' not in st.session_state:
+    st.session_state.batch_mode = list(MODE_MODIFIERS.keys())[0]
+st.session_state.batch_mode = st.sidebar.selectbox("Apply Mode to All Stops", list(MODE_MODIFIERS.keys()), index=list(MODE_MODIFIERS.keys()).index(st.session_state.batch_mode))
+batch_modifier = MODE_MODIFIERS[st.session_state.batch_mode]
+
+# === SES CALCULATION ===
+df_stops['SES'] = df_stops.apply(lambda row: calculate_ses(row, batch_modifier), axis=1)
+df_stops['SES_Category'] = df_stops['SES'].apply(assign_ses_category)
+
+# === DISPLAY RESULTS ===
+render_map(df_stops)
+render_safety_summary(df_stops)
+
+# === DATAFRAME DISPLAY ===
+st.subheader("Detailed Stop Data")
+st.dataframe(df_stops)
+
+# === SIMULATION MODULE ===
+st.header("\U0001F4CA Community-Wide Safety Simulation")
+simulation_results = simulate_all_modes(df_stops)
+render_simulation_chart(simulation_results)
+
+
