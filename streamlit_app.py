@@ -38,13 +38,18 @@ SES_THRESHOLDS = {
     'Acceptable': 70
 }
 # === HELPERS ===
+def normalize_columns(df):
+    df.columns = [col.strip().lower() for col in df.columns]
+    return df
+
 def validate_uploaded_file(df):
-    required_columns = list(SES_WEIGHTS.keys()) + ['Address']
+    df = normalize_columns(df)
+    required_columns = list(SES_WEIGHTS.keys()) + ['address']
     missing_cols = [col for col in required_columns if col not in df.columns]
     if missing_cols:
         st.error(f"Uploaded file is missing columns: {', '.join(missing_cols)}")
-        return False
-    return True
+        return None
+    return df
 
 @st.cache_data(show_spinner="Geocoding addresses...")
 def geocode_addresses(addresses):
