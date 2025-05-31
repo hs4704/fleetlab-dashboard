@@ -140,7 +140,10 @@ if uploaded_file:
         st.stop()
     st.sidebar.success("✅ File uploaded successfully!")
 else:
-    df_stops = pd.read_csv("sample_stops.csv")
+    df_temp= pd.read_csv("sample_stops.csv)
+    df_stops = validate_uploaded_file(df_temp)
+    if df_stops is None:
+        st.stop()
     st.sidebar.warning("📄 Using default sample_stops.csv")
 
 # === GEOCODING ===
