@@ -86,13 +86,13 @@ def assign_ses_category(score):
 
 # INTERACTIVE MAP
 def render_map(df):
-    m = folium.Map(location=[df['Latitude'].mean(), df['Longitude'].mean()], zoom_start=12)
+    m = folium.Map(location=[df['latitude'].mean(), df['longitude'].mean()], zoom_start=12)
     marker_cluster = MarkerCluster().add_to(m)
 
     for _, row in df.iterrows():
-        popup = folium.Popup(f"Address: {row['Address']}<br>SES: {row['SES']:.1f}<br>Category: {row['SES_Category']}", max_width=300)
+        popup = folium.Popup(f"Address: {row['address']}<br>SES: {row['SES']:.1f}<br>Category: {row['SES_Category']}", max_width=300)
         color = {"Safe": "green", "Acceptable": "orange", "Unsafe": "red"}[row['SES_Category']]
-        folium.Marker([row['Latitude'], row['Longitude']], popup=popup, icon=folium.Icon(color=color)).add_to(marker_cluster)
+        folium.Marker([row['latitude'], row['longitude']], popup=popup, icon=folium.Icon(color=color)).add_to(marker_cluster)
     
     st_folium(m, width=700, height=500)
 # SAFETY SUMMARY BAR CHART
@@ -134,8 +134,9 @@ st.sidebar.header("Upload Your Stop File")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with Stop Data", type="csv")
 
 if uploaded_file:
-    df_stops = pd.read_csv(uploaded_file)
-    if not validate_uploaded_file(df_stops):
+    df_temp = pd.read_csv(uploaded_file)
+    df_stops = validate_uploaded_file(df_temp)
+    if df_stops is None:
         st.stop()
     st.sidebar.success("✅ File uploaded successfully!")
 else:
@@ -143,10 +144,10 @@ else:
     st.sidebar.warning("📄 Using default sample_stops.csv")
 
 # === GEOCODING ===
-if 'Latitude' not in df_stops.columns or 'Longitude' not in df_stops.columns:
-    lat, lon = geocode_addresses(df_stops['Address'])
-    df_stops['Latitude'] = lat
-    df_stops['Longitude'] = lon
+if 'latitude' not in df_stops.columns or 'longitude' not in df_stops.columns:
+    lat, lon = geocode_addresses(df_stops['address'])
+    df_stops['latitude'] = lat
+    df_stops['longitude'] = lon
 
 # === BATCH MODE OVERRIDE ===
 st.sidebar.header("Batch Mode Override")
