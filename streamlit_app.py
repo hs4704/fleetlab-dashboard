@@ -9,18 +9,23 @@ import time
 
 # === PAGE CONFIG ===
 st.set_page_config(page_title="FleetLab Safety Dashboard", layout="wide")
+
+# Optional branding (if logo exists)
+# st.image("fleetlab_logo.png", width=200)
+
 st.title("\U0001F696 FleetLab Safety Estimation Dashboard")
 
 # === FILE UPLOAD ===
 st.sidebar.header("Upload Your Stop File")
 uploaded_file = st.sidebar.file_uploader("Upload CSV with Stop Data", type="csv")
 
-if uploaded_file:
-    df_stops = pd.read_csv(uploaded_file)
-    st.sidebar.success("✅ File uploaded successfully!")
-else:
-    df_stops = pd.read_csv("sample_stops.csv")
-    st.sidebar.warning("📄 Using default sample_stops.csv")
+with st.spinner("Loading stop data..."):
+    if uploaded_file:
+        df_stops = pd.read_csv(uploaded_file)
+        st.sidebar.success("✅ File uploaded successfully!")
+    else:
+        df_stops = pd.read_csv("sample_stops.csv")
+        st.sidebar.warning("📄 Using default sample_stops.csv")
 
 # === GOOGLE MAPS GEOCODING ===
 gmaps = googlemaps.Client(key=st.secrets["google"]["maps_api_key"])
@@ -59,6 +64,8 @@ van_adoption = st.sidebar.slider("FleetLab Van Adoption (%)", 0.0, 1.0, 0.2, 0.0
 avg_ses = st.sidebar.slider("Avg Stop SES Score", 0.0, 1.0, 0.7, 0.05)
 students = st.sidebar.slider("Total Students in District", 100, 10000, 2000, 100)
 
+st.sidebar.divider()
+
 # === SES WEIGHT SLIDERS ===
 st.sidebar.header("Customize SES Weights")
 weights = {
@@ -70,6 +77,9 @@ weights = {
     "C": st.sidebar.slider("Weight: Construction Risk", 0.0, 1.0, 0.05, 0.05),
     "U": st.sidebar.slider("Weight: U-Turn Required", 0.0, 1.0, 0.05, 0.05)
 }
+
+st.sidebar.divider()
+st.sidebar.markdown(f"**Van Adoption:** {van_adoption*100:.1f}%")
 
 # === TRANSPORTATION MODE MODIFIERS ===
 mode_modifiers = {
@@ -199,7 +209,7 @@ with st.expander("\U0001F30D Stop Safety Map", expanded=False):
                            f"SES: {row['SES Score']:.2f}<br>"
                            f"Rating: {row['Safety Rating']}<br>"
                            f"<b>Best Mode:</b> {row['Recommended Mode']}<br>"
-                           f"Best SES: {row['Recommended SES']:.2f}"
+                           f"Best SES: {row['Recommended SES']:.2f}<br>"
                            f"Selected Mode: {row['Selected Mode']}<br>")
                 ).add_to(marker_cluster)
         st_folium(m, width=800)
@@ -208,12 +218,12 @@ with st.expander("\U0001F30D Stop Safety Map", expanded=False):
 
 # === SES TABLE + BAR CHART ===
 with st.expander("\U0001F68F Stop Safety Table + Chart", expanded=False):
-    st.dataframe(df_stops[["Stop Name", "SES Score", "Safety Rating", "Recommended Mode", "Recommended SES"]])
+    st.dataframe(df_stops[["Stop Name", "SES Score", "Safety Rating", "Recommended Mode", "Recommended SES"]], use_container_width=True)
 
     fig2, ax2 = plt.subplots(figsize=(10, 6))
     df_sorted = df_stops.sort_values("SES Score")
     colors = df_sorted["Safety Rating"].map({
-        "Safe": "green", "Acceptable": "orange", "Unsafe": "red"
+        "Safe": "#4CAF50", "Acceptable": "#FFC107", "Unsafe": "#F44336"
     })
     ax2.barh(df_sorted["Stop Name"], df_sorted["SES Score"], color=colors)
     ax2.axvline(0.7, linestyle="--", color="green", label="Safe Threshold (0.7)")
@@ -223,5 +233,6 @@ with st.expander("\U0001F68F Stop Safety Table + Chart", expanded=False):
     plt.legend(loc="lower right")
     plt.tight_layout()
     st.pyplot(fig2)
+
 
 
