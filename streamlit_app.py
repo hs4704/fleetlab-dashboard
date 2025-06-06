@@ -158,6 +158,15 @@ ax.set_ylabel("Expected Injuries per 1M Students")
 ax.set_title("System Risk Comparison")
 st.pyplot(fig)
 
+# === Calculate Best Mode & Best SES For Each Stop ===
+def get_best_mode_and_ses(row):
+    best_scores = {mode: calculate_ses(row, mode) for mode in mode_options}
+    best_mode = max(best_scores, key=best_scores.get)
+    best_ses = best_scores[best_mode]
+    return pd.Series([best_mode, best_ses], index=["Best Mode", "Best SES"])
+
+df_stops[["Best Mode", "Best SES"]] = df_stops.apply(get_best_mode_and_ses, axis=1)
+
 # === MAP WITH BEST MODE ===
 st.subheader("🌍 Stop Safety Map")
 if "lat" in df_stops.columns and "lon" in df_stops.columns:
@@ -165,15 +174,12 @@ if "lat" in df_stops.columns and "lon" in df_stops.columns:
     marker_cluster = MarkerCluster().add_to(m)
     for _, row in df_stops.iterrows():
         color = "green" if row["Safety Rating"] == "Safe" else "orange" if row["Safety Rating"] == "Acceptable" else "red"
-        best_scores = {mode: calculate_ses(row, mode) for mode in mode_options}
-        best_mode = max(best_scores, key=best_scores.get)
-        best_ses = best_scores[best_mode]
         popup_html = f"""
             <b>{row['Stop Name']}</b><br>
             SES Score (Current): {row['SES Score']:.2f}<br>
             Safety Rating: {row['Safety Rating']}<br>
             Selected Mode: {row['Selected Mode']}<br>
-            Best Mode: {best_mode} ({best_ses:.2f})
+            Best Mode: {row['Best Mode']} ({row['Best SES']:.2f})
         """
         folium.CircleMarker(
             location=[row["lat"], row["lon"]],
@@ -186,3 +192,26 @@ if "lat" in df_stops.columns and "lon" in df_stops.columns:
     st_folium(m, width=900, height=600)
 else:
     st.warning("No lat/lon data available to render map.")
+
+# === SES TABLE ===
+st.subheader("🚏 Stop-Level SES Table")
+st.dataframe(df_stops[["Stop Name", "SES Score", "Safety Rating", "Selected Mode", "Best Mode", "Best SES"]], use_container_width=True)
+
+# === SES SCORE DISTRIBUTION BAR CHART ===
+st.subheader("📈 SES Score Distribution")
+df_sorted = df_stops.sort_values("SES Score")
+colors = df_sorted["Safety Rating"].map({
+    "Safe": "#4CAF50",
+    "Acceptable": "#FFC107",
+    "Unsafe": "#F44336"
+})
+
+fig2, ax2 = plt.subplots(figsize=(10, 6))
+ax2.barh(df_sorted["Stop Name"], df_sorted["SES Score"], color=colors)
+ax2.axvline(0.7, linestyle="--", color="green", label="Safe Threshold (0.7)")
+ax2.axvline(0.5, linestyle="--", color="orange", label="Acceptable Threshold (0.5)")
+ax2.set_xlabel("SES Score")
+plt.legend(loc="lower right")
+plt.tight_layout()
+st.pyplot(fig2)
+
