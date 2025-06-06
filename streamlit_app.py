@@ -8,7 +8,7 @@ import googlemaps
 import time
 
 # === PAGE CONFIG ===
-st.set_page_config(page_title="FleetLab Safety Dashboard v1.7", layout="wide")
+st.set_page_config(page_title="FleetLab Safety Dashboard v1.8.1", layout="wide")
 
 st.title("\U0001F696 FleetLab Safety Estimation Dashboard")
 
@@ -90,6 +90,13 @@ weights = {
     "U": st.sidebar.slider("U-Turn Required", 0.0, 1.0, 0.05, 0.05)
 }
 
+# === MODE MODIFIERS ===
+mode_modifiers = {
+    "Car": {"T": 0.1, "U": 0.2, "P": -0.1},
+    "School Bus": {"T": -0.1, "U": 0.0, "P": 0.0},
+    "FleetLab Van": {"T": -0.2, "U": -0.2, "P": 0.2}
+}
+
 # === COMPACT MODE SELECTOR ===
 st.sidebar.header("Transportation Mode Assignment")
 stop_list = df_stops["Stop Name"].tolist()
@@ -100,16 +107,9 @@ if "Selected Mode" not in df_stops.columns:
     df_stops["Selected Mode"] = "Car"
 df_stops.loc[df_stops["Stop Name"] == selected_stop, "Selected Mode"] = selected_mode
 
-# === MODE MODIFIERS ===
-mode_modifiers = {
-    "Car": {"T": 0.1, "U": 0.2, "P": -0.1},
-    "School Bus": {"T": -0.1, "U": 0.0, "P": 0.0},
-    "FleetLab Van": {"T": -0.2, "U": -0.2, "P": 0.2}
-}
-
 # === SES SCORE CALCULATION ===
-def compute_ses(row):
-    mods = mode_modifiers.get(row["Selected Mode"], {})
+def calculate_ses(row, mode):
+    mods = mode_modifiers.get(mode, {})
     adjusted = {
         "V": row["Visibility (V)"],
         "L": row["Lighting (L)"],
@@ -129,7 +129,7 @@ def compute_ses(row):
         weights["U"] * (1 - adjusted["U"])
     )
 
-df_stops["SES Score"] = df_stops.apply(compute_ses, axis=1)
+df_stops["SES Score"] = df_stops.apply(lambda row: calculate_ses(row, row["Selected Mode"]), axis=1)
 
 def classify_ses(score):
     if score > 0.7:
@@ -155,7 +155,29 @@ estimated_incidents = max(community_score, 0) * students / 1000
 st.write(f"**Community Score:** {community_score:.2f} → {category}")
 st.write(f"Estimated annual incidents: {estimated_incidents:.1f} per {students} students")
 
-# === MAP ===
+# === FLEET ADOPTION RISK CHART ===
+data = {"Mode": ["Car", "School Bus", "FleetLab Van"], "Base %": [0.5, 0.4, 0.1], "Risk per Million": [15, 4, 2]}
+df_transport = pd.DataFrame(data)
+df_transport["Switch %"] = df_transport["Base %"]
+df_transport.loc[df_transport["Mode"] == "FleetLab Van", "Switch %"] = van_adoption
+remaining = 1 - van_adoption
+other_modes = df_transport[df_transport["Mode"] != "FleetLab Van"].copy()
+other_modes["Switch %"] = (other_modes["Base %"] / other_modes["Base %"].sum()) * remaining
+df_transport.update(other_modes)
+df_transport["Base Risk"] = df_transport["Risk per Million"] * df_transport["Base %"]
+df_transport["Switch Risk"] = df_transport["Risk per Million"] * df_transport["Switch %"]
+
+base_risk = df_transport["Base Risk"].sum()
+switch_risk = df_transport["Switch Risk"].sum()
+
+st.subheader("\U0001F4CA Fleet Adoption Risk Reduction")
+plt.figure(figsize=(5,4))
+plt.bar(["Current Fleet", "After FleetLab"], [base_risk, switch_risk], color=["#FFA07A", "#90EE90"])
+plt.ylabel("Expected Injuries per 1M Students")
+plt.title("System Risk Comparison")
+st.pyplot()
+
+# === MAP WITH BEST MODE ===
 st.subheader("\U0001F30D Stop Safety Map")
 if "lat" in df_stops.columns and "lon" in df_stops.columns:
     m = folium.Map(location=[df_stops["lat"].mean(), df_stops["lon"].mean()], zoom_start=13)
@@ -163,21 +185,8 @@ if "lat" in df_stops.columns and "lon" in df_stops.columns:
 
     for _, row in df_stops.iterrows():
         color = "green" if row["Safety Rating"] == "Safe" else "orange" if row["Safety Rating"] == "Acceptable" else "red"
-        popup_html = f"""
-            <b>{row['Stop Name']}</b><br>
-            SES: {row['SES Score']:.2f}<br>
-            Safety Rating: {row['Safety Rating']}<br>
-            Selected Mode: {row['Selected Mode']}<br>
-        """
-        folium.CircleMarker(
-            location=[row["lat"], row["lon"]],
-            radius=6,
-            color=color,
-            fill=True,
-            fill_opacity=0.7,
-            popup=folium.Popup(popup_html, max_width=500)
-        ).add_to(marker_cluster)
 
-    st_folium(m, width=900, height=600)
-else:
-    st.warning("📍 No latitude/longitude data available to render map.")
+        # Calculate best mode
+        best_scores = {mode: calculate_ses(row, mode) for mode in mode_options}
+        best_mode = max(best_scores, key=best_scores.get)
+        best_ses = best_scores[best_mode]
