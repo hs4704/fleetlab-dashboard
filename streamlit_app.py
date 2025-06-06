@@ -48,6 +48,33 @@ def geocode_addresses(addresses):
             longitudes.append(None)
         time.sleep(0.2)
     return latitudes, longitudes
+# === AUTO FILL MISSING FACTORS ===
+def autofill_missing_fields(df):
+    for idx, row in df.iterrows():
+        address = row['Address']
+
+        # Traffic Risk (proxy via nearby road types)
+        if 'Traffic Risk (T)' not in df.columns or pd.isna(row.get('Traffic Risk (T)')):
+            df.at[idx, 'Traffic Risk (T)'] = 0.5  # Default midpoint risk (for now)
+
+        # U-Turn detection via Google Directions API
+        if 'U-Turn Required (U)' not in df.columns or pd.isna(row.get('U-Turn Required (U)')):
+            try:
+                directions = gmaps.directions("school address", address, mode="driving")
+                u_turn = 0
+                for leg in directions:
+                    for step in leg['legs'][0]['steps']:
+                        if step.get('maneuver') == 'uturn-left' or step.get('maneuver') == 'uturn-right':
+                            u_turn = 1
+                df.at[idx, 'U-Turn Required (U)'] = u_turn
+            except:
+                df.at[idx, 'U-Turn Required (U)'] = 0
+
+        # Construction Risk (placeholder)
+        if 'Construction Risk (C)' not in df.columns or pd.isna(row.get('Construction Risk (C)')):
+            df.at[idx, 'Construction Risk (C)'] = 0.2  # Low default construction risk
+    
+    return df
 
 if "lat" not in df_stops.columns or "lon" not in df_stops.columns:
     if "Address" in df_stops.columns:
@@ -56,6 +83,10 @@ if "lat" not in df_stops.columns or "lon" not in df_stops.columns:
         df_stops["lon"] = lons
     else:
         st.warning("⚠️ No Address column found, and no lat/lon available.")
+
+# Run autofill to generate missing fields
+with st.spinner("Auto-generating missing safety factors..."):
+    df_stops = autofill_missing_fields(df_stops)
 
 # === COMMUNITY RISK SLIDERS ===
 st.sidebar.header("Community Risk Inputs")
