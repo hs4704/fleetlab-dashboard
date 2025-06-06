@@ -8,9 +8,9 @@ import googlemaps
 import time
 
 # === PAGE CONFIG ===
-st.set_page_config(page_title="FleetLab Safety Dashboard v1.8.1", layout="wide")
+st.set_page_config(page_title="FleetLab Safety Dashboard v1.8.2", layout="wide")
 
-st.title("\U0001F696 FleetLab Safety Estimation Dashboard")
+st.title("🚐 FleetLab Safety Estimation Dashboard")
 
 # === FILE UPLOAD ===
 st.sidebar.header("Upload Your Stop File")
@@ -97,7 +97,7 @@ mode_modifiers = {
     "FleetLab Van": {"T": -0.2, "U": -0.2, "P": 0.2}
 }
 
-# === COMPACT MODE SELECTOR ===
+# === MODE SELECTOR ===
 st.sidebar.header("Transportation Mode Assignment")
 stop_list = df_stops["Stop Name"].tolist()
 selected_stop = st.sidebar.selectbox("Select Stop", stop_list)
@@ -107,7 +107,7 @@ if "Selected Mode" not in df_stops.columns:
     df_stops["Selected Mode"] = "Car"
 df_stops.loc[df_stops["Stop Name"] == selected_stop, "Selected Mode"] = selected_mode
 
-# === SES SCORE CALCULATION ===
+# === SES CALCULATION FUNCTION ===
 def calculate_ses(row, mode):
     mods = mode_modifiers.get(mode, {})
     adjusted = {
@@ -119,39 +119,21 @@ def calculate_ses(row, mode):
         "C": row["Construction Risk (C)"],
         "U": max(min(row["U-Turn Required (U)"] + mods.get("U", 0), 1), 0)
     }
-    return (
-        weights["V"] * adjusted["V"] +
-        weights["L"] * adjusted["L"] +
-        weights["T"] * (1 - adjusted["T"]) +
-        weights["P"] * adjusted["P"] +
-        weights["S"] * (1 - adjusted["S"]) +
-        weights["C"] * (1 - adjusted["C"]) +
-        weights["U"] * (1 - adjusted["U"])
-    )
+    return sum(weights[k] * (adjusted[k] if k not in ["T", "S", "C", "U"] else 1 - adjusted[k]) for k in weights)
 
+# Apply SES Calculation
 df_stops["SES Score"] = df_stops.apply(lambda row: calculate_ses(row, row["Selected Mode"]), axis=1)
-
-def classify_ses(score):
-    if score > 0.7:
-        return "Safe"
-    elif score >= 0.5:
-        return "Acceptable"
-    else:
-        return "Unsafe"
-
-df_stops["Safety Rating"] = df_stops["SES Score"].apply(classify_ses)
+df_stops["Safety Rating"] = df_stops["SES Score"].apply(lambda score: "Safe" if score>0.7 else "Acceptable" if score>=0.5 else "Unsafe")
 
 # === COMMUNITY RISK ===
-st.subheader("\U0001F3EB Community Risk Estimation")
+st.subheader("🏫 Community Risk Estimation")
 teen_rate = st.slider("Teen Drivers %", 0.0, 1.0, 0.4, 0.05)
 van_adoption = st.slider("FleetLab Van Adoption %", 0.0, 1.0, 0.2, 0.05)
 students = st.slider("Total District Students", 100, 10000, 2000, 100)
-
 avg_ses = df_stops["SES Score"].mean()
 community_score = (teen_rate * 5) - (van_adoption * 3) - (avg_ses * 2)
 category = "✅ Low Risk" if community_score <= -0.5 else "🟡 Medium Risk" if community_score <= 1 else "❌ High Risk"
 estimated_incidents = max(community_score, 0) * students / 1000
-
 st.write(f"**Community Score:** {community_score:.2f} → {category}")
 st.write(f"Estimated annual incidents: {estimated_incidents:.1f} per {students} students")
 
@@ -166,27 +148,41 @@ other_modes["Switch %"] = (other_modes["Base %"] / other_modes["Base %"].sum()) 
 df_transport.update(other_modes)
 df_transport["Base Risk"] = df_transport["Risk per Million"] * df_transport["Base %"]
 df_transport["Switch Risk"] = df_transport["Risk per Million"] * df_transport["Switch %"]
-
 base_risk = df_transport["Base Risk"].sum()
 switch_risk = df_transport["Switch Risk"].sum()
 
-st.subheader("\U0001F4CA Fleet Adoption Risk Reduction")
-plt.figure(figsize=(5,4))
-plt.bar(["Current Fleet", "After FleetLab"], [base_risk, switch_risk], color=["#FFA07A", "#90EE90"])
-plt.ylabel("Expected Injuries per 1M Students")
-plt.title("System Risk Comparison")
-st.pyplot()
+st.subheader("📊 Fleet Adoption Risk Reduction")
+fig, ax = plt.subplots(figsize=(5, 4))
+ax.bar(["Current Fleet", "After FleetLab"], [base_risk, switch_risk], color=["#FFA07A", "#90EE90"])
+ax.set_ylabel("Expected Injuries per 1M Students")
+ax.set_title("System Risk Comparison")
+st.pyplot(fig)
 
 # === MAP WITH BEST MODE ===
-st.subheader("\U0001F30D Stop Safety Map")
+st.subheader("🌍 Stop Safety Map")
 if "lat" in df_stops.columns and "lon" in df_stops.columns:
     m = folium.Map(location=[df_stops["lat"].mean(), df_stops["lon"].mean()], zoom_start=13)
     marker_cluster = MarkerCluster().add_to(m)
-
     for _, row in df_stops.iterrows():
         color = "green" if row["Safety Rating"] == "Safe" else "orange" if row["Safety Rating"] == "Acceptable" else "red"
-
-        # Calculate best mode
         best_scores = {mode: calculate_ses(row, mode) for mode in mode_options}
         best_mode = max(best_scores, key=best_scores.get)
         best_ses = best_scores[best_mode]
+        popup_html = f"""
+            <b>{row['Stop Name']}</b><br>
+            SES Score (Current): {row['SES Score']:.2f}<br>
+            Safety Rating: {row['Safety Rating']}<br>
+            Selected Mode: {row['Selected Mode']}<br>
+            Best Mode: {best_mode} ({best_ses:.2f})
+        """
+        folium.CircleMarker(
+            location=[row["lat"], row["lon"]],
+            radius=6,
+            color=color,
+            fill=True,
+            fill_opacity=0.7,
+            popup=folium.Popup(popup_html, max_width=400)
+        ).add_to(marker_cluster)
+    st_folium(m, width=900, height=600)
+else:
+    st.warning("No lat/lon data available to render map.")
