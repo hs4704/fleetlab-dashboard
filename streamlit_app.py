@@ -166,6 +166,18 @@ if "lat" in df_stops.columns and "lon" in df_stops.columns:
         popup_html = f"""
             <b>{row['Stop Name']}</b><br>
             SES: {row['SES Score']:.2f}<br>
+            Safety Rating: {row['Safety Rating']}<br>
+            Selected Mode: {row['Selected Mode']}<br>
+        """
+        folium.CircleMarker(
+            location=[row["lat"], row["lon"]],
+            radius=6,
+            color=color,
+            fill=True,
+            fill_opacity=0.7,
+            popup=folium.Popup(popup_html, max_width=500)
+        ).add_to(marker_cluster)
 
-
-
+    st_folium(m, width=900, height=600)
+else:
+    st.warning("📍 No latitude/longitude data available to render map.")
